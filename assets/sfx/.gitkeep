@@ -1,0 +1,20 @@
+[sound_banks]
+# Placeholder for audio files
+# Add these files to assets/sfx/ and assets/music/ when available:
+#
+# SFX:
+#   - attack.wav (projectile fire)
+#   - hit.wav (enemy hit)
+#   - kill.wav (enemy death)
+#   - xp_collect.wav (XP gem collect)
+#   - level_up.wav (level up)
+#   - upgrade_select.wav (upgrade selected)
+#   - boss_spawn.wav (Boss appears)
+#   - game_over.wav
+#   - menu_click.wav
+#
+# MUSIC:
+#   - menu_theme.ogg (main menu BGM)
+#   - battle_theme_1.ogg (early waves BGM)
+#   - battle_theme_2.ogg (mid waves BGM)
+#   - boss_theme.ogg (Boss battle BGM)
