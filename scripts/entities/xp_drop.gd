@@ -7,6 +7,19 @@ var bob_timer: float = 0.0
 
 func _ready() -> void:
 	add_to_group("xp_drop")
+	# Create XP sprite if not already set
+	if $Sprite2D and not $Sprite2D.texture:
+		var size = 16
+		var img = Image.create(size, size, false, Image.FORMAT_RGBA8)
+		img.fill(Color(0, 0, 0, 0))
+		for x in range(size):
+			for y in range(size):
+				var dist = Vector2(x - 8, y - 8).length()
+				if dist <= 7:
+					var brightness = 1.0 - dist / 7.0
+					img.set_pixel(x, y, Color(0.2 * brightness, 0.6 * brightness + 0.2, 1.0))
+		$Sprite2D.texture = ImageTexture.create_from_image(img)
+		$Sprite2D.scale = Vector2(1.2, 1.2)
 
 func _process(delta: float) -> void:
 	bob_timer += delta

@@ -1,10 +1,13 @@
-## game_scene.gd - Main gameplay scene
-## Manages the game loop, player, enemies, waves, UI, and level-up
+## game_scene.gd - Main gameplay scene with arena, effects, pause menu
 extends Node2D
 
+const ARENA_SIZE: float = 2000.0
+
 var player: Node2D = null
+var effects_manager: Node2D = null
 var level_up_ui: Control = null
 var hud: Control = null
+var pause_ui: Control = null
 
 func _ready() -> void:
 	_setup_scene()
@@ -13,51 +16,120 @@ func _ready() -> void:
 	GameManager.change_state(GameManager.GameState.PLAYING)
 
 func _setup_scene() -> void:
-	# Create player
+	# Effects Manager
+	effects_manager = Node2D.new()
+	effects_manager.name = "EffectsManager"
+	effects_manager.set_script(preload("res://scripts/core/effects_manager.gd"))
+	add_child(effects_manager)
+
+	# Arena background
+	_create_arena()
+
+	# Player
 	player = _create_player()
 	add_child(player)
-	
-	# Create camera
+
+	# Camera
 	var camera = Camera2D.new()
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 5.0
 	camera.global_position = player.global_position
 	player.add_child(camera)
-	camera.set_owner(player)
-	
-	# Create HUD
+
+	# HUD
 	hud = _create_hud()
 	add_child(hud)
-	
-	# Create Level Up UI
+
+	# Level Up UI
 	level_up_ui = _create_level_up_ui()
 	add_child(level_up_ui)
-	
-	# Create Game Over UI (hidden initially)
+
+	# Pause UI
+	pause_ui = _create_pause_ui()
+	add_child(pause_ui)
+
+	# Game Over UI
 	var game_over_ui = _create_game_over_ui()
 	game_over_ui.name = "GameOverUI"
 	add_child(game_over_ui)
+
+func _create_arena() -> void:
+	# Dark ground
+	var ground = ColorRect.new()
+	ground.position = Vector2(-ARENA_SIZE / 2, -ARENA_SIZE / 2)
+	ground.size = Vector2(ARENA_SIZE, ARENA_SIZE)
+	ground.color = Color(0.06, 0.05, 0.10)
+	ground.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(ground)
+
+	# Subtle grid
+	var grid_color = Color(0.09, 0.08, 0.14)
+	var tile = 64
+	for x in range(-int(ARENA_SIZE / 2), int(ARENA_SIZE / 2), tile):
+		var line = ColorRect.new()
+		line.position = Vector2(x, -ARENA_SIZE / 2)
+		line.size = Vector2(1, ARENA_SIZE)
+		line.color = grid_color
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(line)
+
+	for y in range(-int(ARENA_SIZE / 2), int(ARENA_SIZE / 2), tile):
+		var line = ColorRect.new()
+		line.position = Vector2(-ARENA_SIZE / 2, y)
+		line.size = Vector2(ARENA_SIZE, 1)
+		line.color = grid_color
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(line)
+
+	# Arena boundaries
+	var half = ARENA_SIZE / 2
+	var wall_color = Color(0.2, 0.12, 0.3)
+	var wall_thickness = 12
+
+	var boundaries = [
+		{"pos": Vector2(0, -half - wall_thickness / 2), "size": Vector2(ARENA_SIZE + wall_thickness * 2, wall_thickness)},
+		{"pos": Vector2(0, half + wall_thickness / 2), "size": Vector2(ARENA_SIZE + wall_thickness * 2, wall_thickness)},
+		{"pos": Vector2(-half - wall_thickness / 2, 0), "size": Vector2(wall_thickness, ARENA_SIZE + wall_thickness * 2)},
+		{"pos": Vector2(half + wall_thickness / 2, 0), "size": Vector2(wall_thickness, ARENA_SIZE + wall_thickness * 2)},
+	]
+
+	for b in boundaries:
+		var wall = StaticBody2D.new()
+		wall.position = b.pos
+		var cs = CollisionShape2D.new()
+		cs.shape = RectangleShape2D.new()
+		(cs.shape as RectangleShape2D).size = b.size
+		wall.add_child(cs)
+
+		var visual = ColorRect.new()
+		visual.position = Vector2(-b.size.x / 2, -b.size.y / 2)
+		visual.size = b.size
+		visual.color = wall_color
+		visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		wall.add_child(visual)
+
+		add_child(wall)
 
 func _create_player() -> CharacterBody2D:
 	var p = CharacterBody2D.new()
 	p.name = "Player"
 	p.global_position = Vector2(0, 0)
-	
+
 	# Sprite
 	var sprite = Sprite2D.new()
 	sprite.name = "Sprite2D"
 	sprite.texture = _create_player_texture()
 	sprite.scale = Vector2(1.5, 1.5)
 	p.add_child(sprite)
-	
+
 	# Collision
 	var collision = CollisionShape2D.new()
 	collision.name = "CollisionShape2D"
 	collision.shape = CircleShape2D.new()
 	(collision.shape as CircleShape2D).radius = 12
 	p.add_child(collision)
-	
-	# Damage hitbox (area for enemy contact damage)
+
+	# Hitbox
 	var hitbox = Area2D.new()
 	hitbox.name = "Hitbox"
 	var hitbox_collision = CollisionShape2D.new()
@@ -66,7 +138,7 @@ func _create_player() -> CharacterBody2D:
 	hitbox.add_child(hitbox_collision)
 	hitbox.body_entered.connect(_on_enemy_contact)
 	p.add_child(hitbox)
-	
+
 	# HP bar
 	var hp_bar = TextureProgressBar.new()
 	hp_bar.name = "HPBar"
@@ -77,18 +149,15 @@ func _create_player() -> CharacterBody2D:
 	hp_bar.custom_minimum_size = Vector2(30, 5)
 	hp_bar.position = Vector2(0, -22)
 	p.add_child(hp_bar)
-	
-	# Load player script
+
 	p.set_script(preload("res://scripts/core/player.gd"))
-	
 	return p
 
 func _create_player_texture() -> ImageTexture:
 	var size = 32
 	var img = Image.create(size, size, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
-	
-	# Body (blue knight)
+
 	for x in range(size):
 		for y in range(size):
 			var dist = Vector2(x - 16, y - 16).length()
@@ -96,44 +165,39 @@ func _create_player_texture() -> ImageTexture:
 				img.set_pixel(x, y, Color(0.2, 0.4, 0.9))
 			elif dist <= 14:
 				img.set_pixel(x, y, Color(0.15, 0.3, 0.7))
-	
-	# Eyes
+
 	img.set_pixel(12, 13, Color(1.0, 1.0, 1.0))
 	img.set_pixel(20, 13, Color(1.0, 1.0, 1.0))
-	
-	# Helmet top
+
 	for x in range(10, 23):
 		for y in range(3, 10):
 			if Vector2(x - 16, y - 6).length() <= 8:
 				img.set_pixel(x, y, Color(0.5, 0.5, 0.55))
-	
+
 	return ImageTexture.create_from_image(img)
 
 func _create_hud() -> Control:
-	var hud = Control.new()
-	hud.name = "HUD"
-	hud.set_anchors_preset(Control.PRESET_FULL_RECT)
-	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	
-	# Wave label
+	var hud_node = Control.new()
+	hud_node.name = "HUD"
+	hud_node.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud_node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
 	var wave_label = Label.new()
 	wave_label.name = "WaveLabel"
 	wave_label.position = Vector2(20, 15)
 	wave_label.custom_minimum_size = Vector2(200, 30)
 	wave_label.add_theme_font_size_override("font_size", 20)
 	wave_label.text = "Wave: 0"
-	hud.add_child(wave_label)
-	
-	# Score label
+	hud_node.add_child(wave_label)
+
 	var score_label = Label.new()
 	score_label.name = "ScoreLabel"
 	score_label.position = Vector2(20, 45)
 	score_label.custom_minimum_size = Vector2(200, 30)
 	score_label.add_theme_font_size_override("font_size", 18)
 	score_label.text = "Score: 0"
-	hud.add_child(score_label)
-	
-	# XP bar
+	hud_node.add_child(score_label)
+
 	var xp_bar = TextureProgressBar.new()
 	xp_bar.name = "XPBar"
 	xp_bar.position = Vector2(20, 80)
@@ -142,20 +206,17 @@ func _create_hud() -> Control:
 	xp_bar.value = 0
 	xp_bar.tint_progress = Color(0.3, 0.6, 1.0)
 	xp_bar.fill_mode = TextureProgressBar.FILL_LEFT_TO_RIGHT
-	hud.add_child(xp_bar)
-	
-	# Level label
+	hud_node.add_child(xp_bar)
+
 	var level_label = Label.new()
 	level_label.name = "LevelLabel"
 	level_label.position = Vector2(20, 95)
 	level_label.add_theme_font_size_override("font_size", 14)
 	level_label.text = "Lv.1"
-	hud.add_child(level_label)
-	
-	# Load HUD script
-	hud.set_script(preload("res://scripts/ui/hud.gd"))
-	
-	return hud
+	hud_node.add_child(level_label)
+
+	hud_node.set_script(preload("res://scripts/ui/hud.gd"))
+	return hud_node
 
 func _create_level_up_ui() -> Control:
 	var panel = Control.new()
@@ -164,21 +225,18 @@ func _create_level_up_ui() -> Control:
 	panel.position = Vector2(-250, -150)
 	panel.custom_minimum_size = Vector2(500, 300)
 	panel.visible = false
-	
-	# Background
+
 	var bg = ColorRect.new()
 	bg.color = Color(0.05, 0.05, 0.1, 0.9)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	panel.add_child(bg)
-	
-	# Border
+
 	var border = ColorRect.new()
 	border.color = Color(0.3, 0.7, 1.0)
 	border.position = Vector2(0, 0)
 	border.custom_minimum_size = Vector2(500, 4)
 	panel.add_child(border)
-	
-	# Title
+
 	var title = Label.new()
 	title.name = "TitleLabel"
 	title.text = "⬆ LEVEL UP! ⬆"
@@ -187,18 +245,57 @@ func _create_level_up_ui() -> Control:
 	title.add_theme_font_size_override("font_size", 32)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	panel.add_child(title)
-	
-	# Upgrade buttons container
+
 	var container = VBoxContainer.new()
 	container.name = "UpgradeContainer"
 	container.position = Vector2(30, 70)
 	container.custom_minimum_size = Vector2(440, 200)
 	container.add_theme_constant_override("separation", 10)
 	panel.add_child(container)
-	
-	# Load level up script
+
 	panel.set_script(preload("res://scripts/ui/level_up_ui.gd"))
-	
+	return panel
+
+func _create_pause_ui() -> Control:
+	var panel = Control.new()
+	panel.name = "PauseUI"
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.position = Vector2(-150, -100)
+	panel.custom_minimum_size = Vector2(300, 200)
+	panel.visible = false
+
+	var bg = ColorRect.new()
+	bg.color = Color(0.05, 0.05, 0.1, 0.85)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.add_child(bg)
+
+	var title = Label.new()
+	title.text = "⏸ 暂停"
+	title.position = Vector2(20, 20)
+	title.custom_minimum_size = Vector2(260, 40)
+	title.add_theme_font_size_override("font_size", 28)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(title)
+
+	var resume_btn = Button.new()
+	resume_btn.name = "ResumeButton"
+	resume_btn.text = "继续游戏"
+	resume_btn.position = Vector2(50, 80)
+	resume_btn.custom_minimum_size = Vector2(200, 40)
+	resume_btn.add_theme_font_size_override("font_size", 18)
+	panel.add_child(resume_btn)
+
+	var restart_btn = Button.new()
+	restart_btn.name = "RestartButton"
+	restart_btn.text = "重新开始"
+	restart_btn.position = Vector2(50, 130)
+	restart_btn.custom_minimum_size = Vector2(200, 40)
+	restart_btn.add_theme_font_size_override("font_size", 18)
+	panel.add_child(restart_btn)
+
+	resume_btn.pressed.connect(_on_resume)
+	restart_btn.pressed.connect(_on_restart)
+
 	return panel
 
 func _create_game_over_ui() -> Control:
@@ -208,12 +305,12 @@ func _create_game_over_ui() -> Control:
 	panel.position = Vector2(-200, -120)
 	panel.custom_minimum_size = Vector2(400, 240)
 	panel.visible = false
-	
+
 	var bg = ColorRect.new()
 	bg.color = Color(0.05, 0.02, 0.02, 0.92)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	panel.add_child(bg)
-	
+
 	var title = Label.new()
 	title.text = "💀 GAME OVER"
 	title.position = Vector2(20, 15)
@@ -221,7 +318,7 @@ func _create_game_over_ui() -> Control:
 	title.add_theme_font_size_override("font_size", 36)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	panel.add_child(title)
-	
+
 	var score_label = Label.new()
 	score_label.name = "FinalScoreLabel"
 	score_label.text = "Score: 0"
@@ -230,7 +327,7 @@ func _create_game_over_ui() -> Control:
 	score_label.add_theme_font_size_override("font_size", 22)
 	score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	panel.add_child(score_label)
-	
+
 	var wave_label = Label.new()
 	wave_label.name = "FinalWaveLabel"
 	wave_label.text = "Wave: 0"
@@ -239,7 +336,7 @@ func _create_game_over_ui() -> Control:
 	wave_label.add_theme_font_size_override("font_size", 18)
 	wave_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	panel.add_child(wave_label)
-	
+
 	var restart_btn = Button.new()
 	restart_btn.name = "RestartButton"
 	restart_btn.text = "再来一局"
@@ -247,9 +344,8 @@ func _create_game_over_ui() -> Control:
 	restart_btn.custom_minimum_size = Vector2(200, 45)
 	restart_btn.add_theme_font_size_override("font_size", 20)
 	panel.add_child(restart_btn)
-	
+
 	panel.set_script(preload("res://scripts/ui/game_over_ui.gd"))
-	
 	return panel
 
 func _connect_signals() -> void:
@@ -279,9 +375,21 @@ func _on_game_over(final_score: int, final_wave: int) -> void:
 		if wave_label:
 			wave_label.text = "Wave: %d" % final_wave
 
+func _on_resume() -> void:
+	if pause_ui:
+		pause_ui.visible = false
+	GameManager.change_state(GameManager.GameState.PLAYING)
+
+func _on_restart() -> void:
+	if pause_ui:
+		pause_ui.visible = false
+	get_tree().reload_current_scene()
+
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause"):
 		if GameManager.current_state == GameManager.GameState.PLAYING:
 			GameManager.change_state(GameManager.GameState.PAUSED)
+			if pause_ui:
+				pause_ui.visible = true
 		elif GameManager.current_state == GameManager.GameState.PAUSED:
-			GameManager.change_state(GameManager.GameState.PLAYING)
+			_on_resume()
