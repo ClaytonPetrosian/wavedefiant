@@ -1,5 +1,4 @@
 ## enemy.gd - Enemy AI that chases the player
-## Reads config from SharedData for stats
 extends CharacterBody2D
 
 var enemy_type: int = SharedData.EnemyType.SLIME
@@ -9,12 +8,13 @@ var damage: float = 8.0
 var xp_value: int = 5
 var score_value: int = 10
 
+var boss_attack_timer: float = 0.0
+var boss_attack_interval: float = 3.0
+
 var max_hp: float
 var is_alive: bool = true
 var knockback_velocity: Vector2 = Vector2.ZERO
 var player_ref: Node2D = null
-var hit_cooldown: float = 0.0
-var effects_manager: Node = null
 
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var hp_bar: TextureProgressBar = $HPBar
@@ -24,13 +24,9 @@ func _ready() -> void:
 	add_to_group("enemy")
 	_apply_config()
 
-	# Find player
 	var players = get_tree().get_nodes_in_group("player")
 	if players.size() > 0:
 		player_ref = players[0] as Node2D
-
-	# Find effects manager
-	effects_manager = get_node_or_null("/root/GameScene/EffectsManager")
 
 func _apply_config() -> void:
 	var config = SharedData.ENEMY_CONFIGS.get(enemy_type, SharedData.ENEMY_CONFIGS[SharedData.EnemyType.SLIME])
@@ -42,19 +38,19 @@ func _apply_config() -> void:
 	xp_value = config.xp_value
 	score_value = config.score_value
 
-	# Create sprite
 	_create_sprite(config)
 
-	# Update collision
 	if collision and collision.shape:
 		(collision.shape as CircleShape2D).radius = config.size * 0.6
 
-	# Update HP bar
 	if hp_bar:
 		hp_bar.max_value = max_hp
 		hp_bar.value = hp
 		hp_bar.tint_progress = config.color
 		hp_bar.visible = false
+
+	if enemy_type == SharedData.EnemyType.BOSS:
+		boss_attack_timer = boss_attack_interval
 
 func _create_sprite(config: Dictionary) -> void:
 	if not sprite:
@@ -68,15 +64,12 @@ func _create_sprite(config: Dictionary) -> void:
 	var center = size / 2
 	var radius = config.size
 
-	# Body
 	_draw_circle(img, center, center, radius, config.color)
 
-	# Eyes
 	var eye_offset = int(radius * 0.3)
 	_draw_circle(img, center - eye_offset, center - 2, 2, Color(0.9, 0.1, 0.1))
 	_draw_circle(img, center + eye_offset, center - 2, 2, Color(0.9, 0.1, 0.1))
 
-	# Type-specific features
 	match enemy_type:
 		SharedData.EnemyType.BAT:
 			_draw_circle(img, center - radius - 2, center - 2, int(radius * 0.6), config.color.darkened(0.1))
@@ -101,8 +94,6 @@ func _physics_process(delta: float) -> void:
 	if not is_alive:
 		return
 
-	hit_cooldown -= delta
-
 	if knockback_velocity.length() > 1.0:
 		velocity = knockback_velocity
 		knockback_velocity *= 0.85
@@ -113,7 +104,22 @@ func _physics_process(delta: float) -> void:
 	if hp < max_hp:
 		hp_bar.visible = true
 
+	if enemy_type == SharedData.EnemyType.BOSS:
+		_handle_boss_attack(delta)
+
 	move_and_slide()
+
+func _handle_boss_attack(delta: float) -> void:
+	boss_attack_timer += delta
+	if boss_attack_timer >= boss_attack_interval and player_ref and is_instance_valid(player_ref):
+		boss_attack_timer = 0.0
+		var dir = global_position.direction_to(player_ref.global_position)
+		knockback_velocity = dir * speed * 3.0
+		if sprite:
+			sprite.modulate = Color(1.0, 0.3, 0.0)
+			await get_tree().create_timer(0.15).timeout
+			if is_alive and is_inside_tree():
+				sprite.modulate = Color.WHITE
 
 func take_damage(amount: float, knockback_dir: Vector2 = Vector2.ZERO) -> void:
 	if not is_alive:
@@ -122,9 +128,9 @@ func take_damage(amount: float, knockback_dir: Vector2 = Vector2.ZERO) -> void:
 	hp_bar.value = hp
 
 	if knockback_dir.length() > 0:
-		knockback_velocity = knockback_dir.normalized() * 200.0
+		var kb = 200.0 if enemy_type != SharedData.EnemyType.BOSS else 80.0
+		knockback_velocity = knockback_dir.normalized() * kb
 
-	# Flash white
 	if sprite:
 		sprite.modulate = Color.WHITE
 		await get_tree().create_timer(0.06).timeout
@@ -137,17 +143,31 @@ func take_damage(amount: float, knockback_dir: Vector2 = Vector2.ZERO) -> void:
 func _die() -> void:
 	is_alive = false
 	remove_from_group("enemy")
+
+	# Achievements
+	var am = get_node_or_null("/root/GameScene/AchievementManager")
+	if am:
+		am.check_achievement("first_blood")
+		if enemy_type == SharedData.EnemyType.BOSS:
+			am.check_achievement("boss_slayer")
+
 	GameManager.add_score(score_value)
 
 	# Death particles
-	if effects_manager:
+	var em = get_node_or_null("/root/GameScene/EffectsManager")
+	if em:
 		var config = SharedData.ENEMY_CONFIGS.get(enemy_type, {})
-		var death_color = config.get("color", Color(1.0, 0.85, 0.2))
-		effects_manager.spawn_death_burst(global_position, death_color)
+		em.spawn_death_burst(global_position, config.get("color", Color(1.0, 0.85, 0.2)))
 
-	# Spawn XP drop
+	# Spawn XP
+	_spawn_xp()
+
+	queue_free()
+
+func _spawn_xp() -> void:
 	var xp_drop = Node2D.new()
 	var xp_sprite = Sprite2D.new()
+
 	var size = 16
 	var img = Image.create(size, size, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
@@ -155,8 +175,8 @@ func _die() -> void:
 		for y in range(size):
 			var dist = Vector2(x - 8, y - 8).length()
 			if dist <= 7:
-				var brightness = 1.0 - dist / 7.0
-				img.set_pixel(x, y, Color(0.2 * brightness, 0.6 * brightness + 0.2, 1.0))
+				var b = 1.0 - dist / 7.0
+				img.set_pixel(x, y, Color(0.2 * b, 0.6 * b + 0.2, 1.0))
 	xp_sprite.texture = ImageTexture.create_from_image(img)
 	xp_sprite.scale = Vector2(1.2, 1.2)
 	xp_drop.add_child(xp_sprite)
@@ -170,5 +190,3 @@ func _die() -> void:
 	xp_drop.global_position = global_position + Vector2(randf() - 0.5, randf() - 0.5) * 20
 	xp_drop.value = xp_value
 	get_parent().call_deferred("add_child", xp_drop)
-
-	queue_free()

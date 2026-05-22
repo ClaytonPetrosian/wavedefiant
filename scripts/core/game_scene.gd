@@ -1,60 +1,75 @@
-## game_scene.gd - Main gameplay scene with arena, effects, pause menu
+## game_scene.gd - Main gameplay scene with all systems integrated
 extends Node2D
 
 const ARENA_SIZE: float = 2000.0
 
 var player: Node2D = null
 var effects_manager: Node2D = null
+var combo_manager_node: Node = null
+var achievement_manager_node: Node = null
 var level_up_ui: Control = null
 var hud: Control = null
 var pause_ui: Control = null
+var combo_display: Control = null
+var achievement_popup: Control = null
 
 func _ready() -> void:
+	_setup_autoloads()
 	_setup_scene()
 	_connect_signals()
 	GameManager.reset_run()
 	GameManager.change_state(GameManager.GameState.PLAYING)
 
-func _setup_scene() -> void:
-	# Effects Manager
+func _setup_autoloads() -> void:
+	# ComboManager
+	combo_manager_node = Node.new()
+	combo_manager_node.name = "ComboManager"
+	combo_manager_node.set_script(preload("res://scripts/systems/combo_manager.gd"))
+	add_child(combo_manager_node)
+
+	# AchievementManager
+	achievement_manager_node = Node.new()
+	achievement_manager_node.name = "AchievementManager"
+	achievement_manager_node.set_script(preload("res://scripts/systems/achievement_manager.gd"))
+	add_child(achievement_manager_node)
+
+	# EffectsManager
 	effects_manager = Node2D.new()
 	effects_manager.name = "EffectsManager"
 	effects_manager.set_script(preload("res://scripts/core/effects_manager.gd"))
 	add_child(effects_manager)
 
-	# Arena background
+func _setup_scene() -> void:
 	_create_arena()
 
-	# Player
 	player = _create_player()
 	add_child(player)
 
-	# Camera
 	var camera = Camera2D.new()
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 5.0
 	camera.global_position = player.global_position
 	player.add_child(camera)
 
-	# HUD
 	hud = _create_hud()
 	add_child(hud)
 
-	# Level Up UI
+	combo_display = combo_manager_node.create_combo_display(self)
+
+	achievement_popup = _create_achievement_popup()
+	add_child(achievement_popup)
+
 	level_up_ui = _create_level_up_ui()
 	add_child(level_up_ui)
 
-	# Pause UI
 	pause_ui = _create_pause_ui()
 	add_child(pause_ui)
 
-	# Game Over UI
 	var game_over_ui = _create_game_over_ui()
 	game_over_ui.name = "GameOverUI"
 	add_child(game_over_ui)
 
 func _create_arena() -> void:
-	# Dark ground
 	var ground = ColorRect.new()
 	ground.position = Vector2(-ARENA_SIZE / 2, -ARENA_SIZE / 2)
 	ground.size = Vector2(ARENA_SIZE, ARENA_SIZE)
@@ -62,7 +77,6 @@ func _create_arena() -> void:
 	ground.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(ground)
 
-	# Subtle grid
 	var grid_color = Color(0.09, 0.08, 0.14)
 	var tile = 64
 	for x in range(-int(ARENA_SIZE / 2), int(ARENA_SIZE / 2), tile):
@@ -81,7 +95,6 @@ func _create_arena() -> void:
 		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		add_child(line)
 
-	# Arena boundaries
 	var half = ARENA_SIZE / 2
 	var wall_color = Color(0.2, 0.12, 0.3)
 	var wall_thickness = 12
@@ -115,21 +128,18 @@ func _create_player() -> CharacterBody2D:
 	p.name = "Player"
 	p.global_position = Vector2(0, 0)
 
-	# Sprite
 	var sprite = Sprite2D.new()
 	sprite.name = "Sprite2D"
 	sprite.texture = _create_player_texture()
 	sprite.scale = Vector2(1.5, 1.5)
 	p.add_child(sprite)
 
-	# Collision
 	var collision = CollisionShape2D.new()
 	collision.name = "CollisionShape2D"
 	collision.shape = CircleShape2D.new()
 	(collision.shape as CircleShape2D).radius = 12
 	p.add_child(collision)
 
-	# Hitbox
 	var hitbox = Area2D.new()
 	hitbox.name = "Hitbox"
 	var hitbox_collision = CollisionShape2D.new()
@@ -139,7 +149,6 @@ func _create_player() -> CharacterBody2D:
 	hitbox.body_entered.connect(_on_enemy_contact)
 	p.add_child(hitbox)
 
-	# HP bar
 	var hp_bar = TextureProgressBar.new()
 	hp_bar.name = "HPBar"
 	hp_bar.max_value = 100
@@ -217,6 +226,69 @@ func _create_hud() -> Control:
 
 	hud_node.set_script(preload("res://scripts/ui/hud.gd"))
 	return hud_node
+
+func _create_achievement_popup() -> Control:
+	var panel = Control.new()
+	panel.name = "AchievementPopup"
+	panel.position = Vector2(900, 20)
+	panel.custom_minimum_size = Vector2(300, 60)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.visible = false
+
+	var bg = ColorRect.new()
+	bg.color = Color(0.1, 0.1, 0.15, 0.9)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.add_child(bg)
+
+	var border = ColorRect.new()
+	border.color = Color(1.0, 0.85, 0.0)
+	border.position = Vector2(0, 0)
+	border.custom_minimum_size = Vector2(300, 3)
+	panel.add_child(border)
+
+	var icon_label = Label.new()
+	icon_label.name = "IconLabel"
+	icon_label.position = Vector2(10, 8)
+	icon_label.add_theme_font_size_override("font_size", 24)
+	panel.add_child(icon_label)
+
+	var name_label = Label.new()
+	name_label.name = "NameLabel"
+	name_label.position = Vector2(50, 5)
+	name_label.custom_minimum_size = Vector2(240, 22)
+	name_label.add_theme_font_size_override("font_size", 16)
+	name_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.0))
+	panel.add_child(name_label)
+
+	var desc_label = Label.new()
+	desc_label.name = "DescLabel"
+	desc_label.position = Vector2(50, 28)
+	desc_label.custom_minimum_size = Vector2(240, 20)
+	desc_label.add_theme_font_size_override("font_size", 12)
+	desc_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.8))
+	panel.add_child(desc_label)
+
+	# Connect to achievement manager
+	if achievement_manager_node:
+		achievement_manager_node.achievement_unlocked.connect(func(id, name, desc, icon):
+			icon_label.text = icon
+			name_label.text = name
+			desc_label.text = desc
+			panel.visible = true
+
+			# Slide in
+			panel.position.x = 900
+			var tween = create_tween()
+			tween.tween_property(panel, "position:x", 850, 0.3).set_ease(Tween.EASE_OUT)
+
+			# Auto hide
+			await get_tree().create_timer(3.0).timeout
+			var tween2 = create_tween()
+			tween2.tween_property(panel, "position:x", 900, 0.3).set_ease(Tween.EASE_IN)
+			tween2.tween_callback(func(): panel.visible = false)
+		)
+
+	return panel
 
 func _create_level_up_ui() -> Control:
 	var panel = Control.new()
@@ -351,6 +423,18 @@ func _create_game_over_ui() -> Control:
 func _connect_signals() -> void:
 	GameManager.level_up_triggered.connect(_on_level_up)
 	GameManager.game_over_triggered.connect(_on_game_over)
+
+	# Check level achievements
+	GameManager.level_up_triggered.connect(func(level):
+		if achievement_manager_node:
+			achievement_manager_node.check_level(level)
+	)
+
+	# Check score achievements
+	GameManager.score_updated.connect(func(score):
+		if achievement_manager_node:
+			achievement_manager_node.check_score(score)
+	)
 
 func _on_enemy_contact(body: Node) -> void:
 	if body.is_in_group("enemy"):

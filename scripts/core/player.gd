@@ -1,5 +1,4 @@
 ## player.gd - Player character controller
-## Handles movement, auto-attack, health, XP collection, invincibility frames
 extends CharacterBody2D
 
 const BASE_SPEED: float = 180.0
@@ -8,7 +7,6 @@ const XP_MAGNET_RANGE: float = 120.0
 const XP_COLLECT_SPEED: float = 400.0
 const INVINCIBLE_DURATION: float = 0.5
 
-# Stats (modified by upgrades)
 var speed: float = BASE_SPEED
 var max_hp: float = BASE_HP
 var attack_interval: float = 0.8
@@ -16,14 +14,15 @@ var attack_range: float = 220.0
 var attack_damage: float = 12.0
 var projectile_count: int = 1
 var xp_magnet_range: float = XP_MAGNET_RANGE
-var crit_chance: float = 0.05  # 5% base crit chance
+var crit_chance: float = 0.05
 var crit_multiplier: float = 2.0
+var regen_per_second: float = 0.0
+var armor_stacks: int = 0
 
 var hp: float = BASE_HP
 var is_alive: bool = true
 var is_invincible: bool = false
 var current_attack_timer: float = 0.0
-var regen_per_second: float = 0.0
 
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var hp_bar: TextureProgressBar = $HPBar
@@ -113,19 +112,11 @@ func _fire_projectile(target: Node2D) -> void:
 	var projectile = Area2D.new()
 	projectile.global_position = global_position
 
-	# Visual - glowing orb
 	var proj_sprite = Sprite2D.new()
 	proj_sprite.texture = _create_projectile_texture()
 	proj_sprite.scale = Vector2(1.2, 1.2)
 	projectile.add_child(proj_sprite)
 
-	# Light glow effect
-	var glow = Sprite2D.new()
-	#glow.texture = _create_glow_texture()
-	#glow.scale = Vector2(2.0, 2.0)
-	#projectile.add_child(glow)
-
-	# Collision
 	var proj_collision = CollisionShape2D.new()
 	proj_collision.shape = CircleShape2D.new()
 	(proj_collision.shape as CircleShape2D).radius = 8
@@ -164,13 +155,19 @@ func take_damage(amount: float) -> void:
 		return
 
 	is_invincible = true
+
+	# Apply armor reduction
+	var reduction = 1.0 - (armor_stacks * 0.15)
+	amount *= max(reduction, 0.4)  # Max 60% reduction
+
 	hp -= amount
 
 	# Flash red
-	sprite.modulate = Color(1, 0.3, 0.3)
+	if sprite:
+		sprite.modulate = Color(1, 0.3, 0.3)
 
-	# Screen shake via effects manager
-	var em = get_node_or_null("/root/GameScene/EffectsManager")
+	# Screen shake
+	var em = get_node_or_null("/root/EffectsManager")
 	if em:
 		em.screen_shake(3.0, 0.1)
 

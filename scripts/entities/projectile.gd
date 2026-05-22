@@ -1,4 +1,4 @@
-## projectile.gd - Homing projectile that tracks target
+## projectile.gd - Homing projectile that tracks and hits enemies
 extends Area2D
 
 var target: Node2D = null
@@ -18,8 +18,8 @@ func _process(delta: float) -> void:
 		queue_free()
 		return
 
+	# Find new target if current one is dead
 	if not is_instance_valid(target):
-		# Find new target or die
 		var enemies = get_tree().get_nodes_in_group("enemy")
 		var nearest_dist: float = 300.0
 		target = null
@@ -34,29 +34,37 @@ func _process(delta: float) -> void:
 	if target and is_instance_valid(target):
 		var direction = global_position.direction_to(target.global_position)
 		position += direction * speed * delta
-		# Rotate to face direction
 		rotation = direction.angle()
 
-	# Check collision with enemies
-	var enemies = get_tree().get_nodes_in_group("enemy")
-	for enemy in enemies:
-		if not is_instance_valid(enemy):
-			continue
-		if global_position.distance_to(enemy.global_position) < 20:
-			_hit_enemy(enemy)
+	# Check collision
+	var bodies = get_overlapping_bodies()
+	for body in bodies:
+		if body.is_in_group("enemy"):
+			_hit_enemy(body)
 			queue_free()
 			return
 
 func _hit_enemy(enemy: Node) -> void:
+	if not enemy.has_method("take_damage"):
+		return
+
 	var is_crit = randf() < crit_chance
 	var final_damage = damage * crit_multiplier if is_crit else damage
 
-	if enemy.has_method("take_damage"):
-		var knockback_dir = global_position.direction_to(enemy.global_position) if target else Vector2.RIGHT
-		enemy.take_damage(final_damage, knockback_dir)
+	# Apply combo multiplier
+	var combo_mult = 1.0
+	if has_node("/root/ComboManager"):
+		combo_mult = get_node("/root/ComboManager").get_multiplier()
+	final_damage *= combo_mult
 
-	# Show damage number
-	var em = get_node_or_null("/root/GameScene/EffectsManager")
+	enemy.take_damage(final_damage, global_position.direction_to(enemy.global_position))
+
+	# Damage number
+	var em = get_node_or_null("/root/EffectsManager")
 	if em:
 		var color = Color(1.0, 0.4, 0.2) if is_crit else Color(1.0, 1.0, 1.0)
 		em.show_damage_number(enemy.global_position, final_damage, color, is_crit)
+
+	# Notify combo manager
+	if has_node("/root/ComboManager"):
+		get_node("/root/ComboManager").register_kill()
