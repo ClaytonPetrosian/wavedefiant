@@ -1,4 +1,4 @@
-## game_scene.gd - Main gameplay scene with all systems
+## game_scene.gd - Main gameplay scene with all systems integrated
 extends Node2D
 
 const ARENA_SIZE: float = 2000.0
@@ -14,6 +14,7 @@ var pause_ui: Control = null
 var combo_display: Control = null
 var achievement_popup: Control = null
 var skill_cooldown_bar: Control = null
+var wave_announcer: CanvasLayer = null
 
 func _ready() -> void:
 	_setup_autoloads()
@@ -23,25 +24,21 @@ func _ready() -> void:
 	GameManager.change_state(GameManager.GameState.PLAYING)
 
 func _setup_autoloads() -> void:
-	# ComboManager
 	combo_manager_node = Node.new()
 	combo_manager_node.name = "ComboManager"
 	combo_manager_node.set_script(preload("res://scripts/systems/combo_manager.gd"))
 	add_child(combo_manager_node)
 
-	# AchievementManager
 	achievement_manager_node = Node.new()
 	achievement_manager_node.name = "AchievementManager"
 	achievement_manager_node.set_script(preload("res://scripts/systems/achievement_manager.gd"))
 	add_child(achievement_manager_node)
 
-	# SkillManager
 	skill_manager_node = Node.new()
 	skill_manager_node.name = "SkillManager"
 	skill_manager_node.set_script(preload("res://scripts/core/skill_manager.gd"))
 	add_child(skill_manager_node)
 
-	# EffectsManager
 	effects_manager = Node2D.new()
 	effects_manager.name = "EffectsManager"
 	effects_manager.set_script(preload("res://scripts/core/effects_manager.gd"))
@@ -49,6 +46,14 @@ func _setup_autoloads() -> void:
 
 func _setup_scene() -> void:
 	_create_arena()
+
+	# Wave announcer
+	wave_announcer = CanvasLayer.new()
+	wave_announcer.name = "WaveAnnouncer"
+	wave_announcer.layer = 10
+	wave_announcer.set_script(preload("res://scripts/systems/wave_announcer.gd"))
+	add_child(wave_announcer)
+
 	player = _create_player()
 	add_child(player)
 
@@ -514,7 +519,6 @@ func _input(event: InputEvent) -> void:
 		elif GameManager.current_state == GameManager.GameState.PAUSED:
 			_on_resume()
 
-	# Use active skill
 	if event.is_action_pressed("use_skill"):
 		if GameManager.current_state == GameManager.GameState.PLAYING:
 			if skill_manager_node:
