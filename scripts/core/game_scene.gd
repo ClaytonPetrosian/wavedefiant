@@ -1,4 +1,4 @@
-## game_scene.gd - Main gameplay scene with all systems integrated
+## game_scene.gd - Main gameplay scene with all systems
 extends Node2D
 
 const ARENA_SIZE: float = 2000.0
@@ -7,11 +7,13 @@ var player: Node2D = null
 var effects_manager: Node2D = null
 var combo_manager_node: Node = null
 var achievement_manager_node: Node = null
+var skill_manager_node: Node = null
 var level_up_ui: Control = null
 var hud: Control = null
 var pause_ui: Control = null
 var combo_display: Control = null
 var achievement_popup: Control = null
+var skill_cooldown_bar: Control = null
 
 func _ready() -> void:
 	_setup_autoloads()
@@ -33,6 +35,12 @@ func _setup_autoloads() -> void:
 	achievement_manager_node.set_script(preload("res://scripts/systems/achievement_manager.gd"))
 	add_child(achievement_manager_node)
 
+	# SkillManager
+	skill_manager_node = Node.new()
+	skill_manager_node.name = "SkillManager"
+	skill_manager_node.set_script(preload("res://scripts/core/skill_manager.gd"))
+	add_child(skill_manager_node)
+
 	# EffectsManager
 	effects_manager = Node2D.new()
 	effects_manager.name = "EffectsManager"
@@ -41,7 +49,6 @@ func _setup_autoloads() -> void:
 
 func _setup_scene() -> void:
 	_create_arena()
-
 	player = _create_player()
 	add_child(player)
 
@@ -58,6 +65,9 @@ func _setup_scene() -> void:
 
 	achievement_popup = _create_achievement_popup()
 	add_child(achievement_popup)
+
+	skill_cooldown_bar = _create_skill_cooldown_bar()
+	add_child(skill_cooldown_bar)
 
 	level_up_ui = _create_level_up_ui()
 	add_child(level_up_ui)
@@ -98,14 +108,12 @@ func _create_arena() -> void:
 	var half = ARENA_SIZE / 2
 	var wall_color = Color(0.2, 0.12, 0.3)
 	var wall_thickness = 12
-
 	var boundaries = [
 		{"pos": Vector2(0, -half - wall_thickness / 2), "size": Vector2(ARENA_SIZE + wall_thickness * 2, wall_thickness)},
 		{"pos": Vector2(0, half + wall_thickness / 2), "size": Vector2(ARENA_SIZE + wall_thickness * 2, wall_thickness)},
 		{"pos": Vector2(-half - wall_thickness / 2, 0), "size": Vector2(wall_thickness, ARENA_SIZE + wall_thickness * 2)},
 		{"pos": Vector2(half + wall_thickness / 2, 0), "size": Vector2(wall_thickness, ARENA_SIZE + wall_thickness * 2)},
 	]
-
 	for b in boundaries:
 		var wall = StaticBody2D.new()
 		wall.position = b.pos
@@ -113,14 +121,12 @@ func _create_arena() -> void:
 		cs.shape = RectangleShape2D.new()
 		(cs.shape as RectangleShape2D).size = b.size
 		wall.add_child(cs)
-
 		var visual = ColorRect.new()
 		visual.position = Vector2(-b.size.x / 2, -b.size.y / 2)
 		visual.size = b.size
 		visual.color = wall_color
 		visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		wall.add_child(visual)
-
 		add_child(wall)
 
 func _create_player() -> CharacterBody2D:
@@ -166,7 +172,6 @@ func _create_player_texture() -> ImageTexture:
 	var size = 32
 	var img = Image.create(size, size, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
-
 	for x in range(size):
 		for y in range(size):
 			var dist = Vector2(x - 16, y - 16).length()
@@ -174,15 +179,12 @@ func _create_player_texture() -> ImageTexture:
 				img.set_pixel(x, y, Color(0.2, 0.4, 0.9))
 			elif dist <= 14:
 				img.set_pixel(x, y, Color(0.15, 0.3, 0.7))
-
 	img.set_pixel(12, 13, Color(1.0, 1.0, 1.0))
 	img.set_pixel(20, 13, Color(1.0, 1.0, 1.0))
-
 	for x in range(10, 23):
 		for y in range(3, 10):
 			if Vector2(x - 16, y - 6).length() <= 8:
 				img.set_pixel(x, y, Color(0.5, 0.5, 0.55))
-
 	return ImageTexture.create_from_image(img)
 
 func _create_hud() -> Control:
@@ -227,11 +229,55 @@ func _create_hud() -> Control:
 	hud_node.set_script(preload("res://scripts/ui/hud.gd"))
 	return hud_node
 
+func _create_skill_cooldown_bar() -> Control:
+	var panel = Control.new()
+	panel.name = "SkillCooldownBar"
+	panel.position = Vector2(600, 640)
+	panel.custom_minimum_size = Vector2(120, 40)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var bg = ColorRect.new()
+	bg.color = Color(0.1, 0.1, 0.15, 0.7)
+	bg.position = Vector2(0, 0)
+	bg.size = Vector2(120, 30)
+	panel.add_child(bg)
+
+	var fill = ColorRect.new()
+	fill.name = "SkillFill"
+	fill.color = Color(1.0, 0.5, 0.1)
+	fill.position = Vector2(0, 0)
+	fill.size = Vector2(120, 30)
+	panel.add_child(fill)
+
+	var label = Label.new()
+	label.name = "SkillLabel"
+	label.position = Vector2(0, 0)
+	label.custom_minimum_size = Vector2(120, 30)
+	label.add_theme_font_size_override("font_size", 14)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.text = "🔥 技能 [空格]"
+	panel.add_child(label)
+
+	if skill_manager_node:
+		skill_manager_node.cooldown_updated.connect(func(current, max_cd):
+			var pct = 1.0 - (current / max_cd)
+			fill.size.x = 120.0 * pct
+			if current > 0:
+				label.text = "⏳ %.1fs" % current
+				fill.color = Color(0.4, 0.4, 0.4)
+			else:
+				label.text = "🔥 技能 [空格]"
+				fill.color = Color(1.0, 0.5, 0.1)
+		)
+
+	return panel
+
 func _create_achievement_popup() -> Control:
 	var panel = Control.new()
 	panel.name = "AchievementPopup"
-	panel.position = Vector2(900, 20)
-	panel.custom_minimum_size = Vector2(300, 60)
+	panel.position = Vector2(880, 20)
+	panel.custom_minimum_size = Vector2(320, 60)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.visible = false
 
@@ -243,7 +289,7 @@ func _create_achievement_popup() -> Control:
 	var border = ColorRect.new()
 	border.color = Color(1.0, 0.85, 0.0)
 	border.position = Vector2(0, 0)
-	border.custom_minimum_size = Vector2(300, 3)
+	border.custom_minimum_size = Vector2(320, 3)
 	panel.add_child(border)
 
 	var icon_label = Label.new()
@@ -255,7 +301,7 @@ func _create_achievement_popup() -> Control:
 	var name_label = Label.new()
 	name_label.name = "NameLabel"
 	name_label.position = Vector2(50, 5)
-	name_label.custom_minimum_size = Vector2(240, 22)
+	name_label.custom_minimum_size = Vector2(260, 22)
 	name_label.add_theme_font_size_override("font_size", 16)
 	name_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.0))
 	panel.add_child(name_label)
@@ -263,28 +309,23 @@ func _create_achievement_popup() -> Control:
 	var desc_label = Label.new()
 	desc_label.name = "DescLabel"
 	desc_label.position = Vector2(50, 28)
-	desc_label.custom_minimum_size = Vector2(240, 20)
+	desc_label.custom_minimum_size = Vector2(260, 20)
 	desc_label.add_theme_font_size_override("font_size", 12)
 	desc_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.8))
 	panel.add_child(desc_label)
 
-	# Connect to achievement manager
 	if achievement_manager_node:
-		achievement_manager_node.achievement_unlocked.connect(func(id, name, desc, icon):
+		achievement_manager_node.achievement_unlocked.connect(func(_id, name, desc, icon):
 			icon_label.text = icon
-			name_label.text = name
+			name_label.text = "🏆 %s" % name
 			desc_label.text = desc
 			panel.visible = true
-
-			# Slide in
-			panel.position.x = 900
+			panel.position.x = 880
 			var tween = create_tween()
 			tween.tween_property(panel, "position:x", 850, 0.3).set_ease(Tween.EASE_OUT)
-
-			# Auto hide
 			await get_tree().create_timer(3.0).timeout
 			var tween2 = create_tween()
-			tween2.tween_property(panel, "position:x", 900, 0.3).set_ease(Tween.EASE_IN)
+			tween2.tween_property(panel, "position:x", 880, 0.3).set_ease(Tween.EASE_IN)
 			tween2.tween_callback(func(): panel.visible = false)
 		)
 
@@ -367,7 +408,6 @@ func _create_pause_ui() -> Control:
 
 	resume_btn.pressed.connect(_on_resume)
 	restart_btn.pressed.connect(_on_restart)
-
 	return panel
 
 func _create_game_over_ui() -> Control:
@@ -424,17 +464,13 @@ func _connect_signals() -> void:
 	GameManager.level_up_triggered.connect(_on_level_up)
 	GameManager.game_over_triggered.connect(_on_game_over)
 
-	# Check level achievements
-	GameManager.level_up_triggered.connect(func(level):
-		if achievement_manager_node:
+	if achievement_manager_node:
+		GameManager.level_up_triggered.connect(func(level):
 			achievement_manager_node.check_level(level)
-	)
-
-	# Check score achievements
-	GameManager.score_updated.connect(func(score):
-		if achievement_manager_node:
+		)
+		GameManager.score_updated.connect(func(score):
 			achievement_manager_node.check_score(score)
-	)
+		)
 
 func _on_enemy_contact(body: Node) -> void:
 	if body.is_in_group("enemy"):
@@ -477,3 +513,9 @@ func _input(event: InputEvent) -> void:
 				pause_ui.visible = true
 		elif GameManager.current_state == GameManager.GameState.PAUSED:
 			_on_resume()
+
+	# Use active skill
+	if event.is_action_pressed("use_skill"):
+		if GameManager.current_state == GameManager.GameState.PLAYING:
+			if skill_manager_node:
+				skill_manager_node.try_use_skill()
